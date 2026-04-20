@@ -2,41 +2,40 @@
 
 > 気分を選ぶと、今日あなたに合いそうな10曲を並べるWebアプリ。
 
-[https://juke-beryl.vercel.app](https://juke-beryl.vercel.app)
-
-気分タグを最大3つ選ぶとSpotifyから曲をキュレートし、そのまま Spotify で聴ける。非公開プレイリストを自動作成する機能もあり（要ログイン）。
+気分タグを最大3つ選ぶと Apple Music からキュレートして、そのまま Apple Music で聴ける。Apple Music にサインインすれば、ライブラリに並び通りのプレイリストを自動作成。
 
 ## 主要機能
 
 - 気分タグ（12種）× 強さ（3段階）で 5〜10曲のプレイリスト生成
 - 結果のURLはブックマーク可能（`?moods=...&intensity=N&tracks=id1,id2,...`）
-- Spotifyアプリ/Webに別窓で遷移して再生
-    - ログインしない → 1曲目だけ開く（Spotifyの自動再生に委ねる）
-    - Spotifyログイン → ユーザーのアカウントに非公開プレイリストを作って並び通り再生
+- Apple Music に別窓で遷移して再生
+    - サインインしない → 1曲目だけ開く（Apple Music の自動再生に委ねる）
+    - Apple Music サインイン → ユーザーのライブラリにプレイリストを作成して並び通り再生
 - PWA対応（iOS/Androidでホーム画面に追加可）
 - ライト/ダーク/OS追従の3テーマ
 
 ## 技術スタック
 
 - **React 18** + **Vite 6** (JSX, no TypeScript)
-- **Vercel Serverless Functions** (`api/spotify.js`) — Client Credentialsでの Spotify API 代行
+- **Vercel Serverless Functions** (`api/apple.js`) — MusicKit Developer Token (JWT ES256) 発行と Apple Music API 代行
+- **MusicKit JS v3** — Music User Token 取得 + プレイリスト操作
+- **jose** — ES256 で JWT 署名
 - **vite-plugin-pwa** + Workbox — Manifest / Service Worker / ランタイムキャッシュ
-- 直接スタイル（CSS変数 + BEM風プレフィックス `j-`）、UIライブラリ非使用
 
 ## アーキテクチャ
 
-### Spotify API の使い分け
+### Apple Music API の使い分け
 
 2種類のトークンを使い分けている：
 
 | 用途 | フロー | トークン保持場所 | 用途範囲 |
 |---|---|---|---|
-| 検索・トラック取得 | Client Credentials | Vercel関数の in-memory キャッシュ | `/v1/search`, `/v1/tracks` |
-| プレイリスト作成 | Authorization Code + PKCE | ブラウザ `sessionStorage` | `/v1/me`, `/v1/users/{id}/playlists`, `/v1/playlists/{id}/*` |
+| カタログ検索・曲取得 | Developer Token (ES256 JWT) | Vercel 関数で生成・キャッシュ (30日) | `/v1/catalog/{storefront}/search`, `/v1/catalog/{storefront}/songs` |
+| プレイリスト作成 | Music User Token | MusicKit JS が Cookie 管理 | `/v1/me/library/playlists` |
 
-**Client Credentials は Client Secret が必須**。これを絶対にクライアントに露出させないため、検索系は Vercel Function (`api/spotify.js`) で代理実行する。
+**Developer Token は Apple の .p8 秘密鍵で JWT 署名する必要がある**。これを絶対にクライアントに露出させないため、Vercel Function (`api/apple.js`) で生成する。
 
-**PKCE はユーザーの Spotify アカウントに対するもの**で、プレイリスト作成(`playlist-modify-private` scope)のみに必要。Client Secretは使わない。Redirect URI に `<origin>/callback` を登録する必要あり。
+**Music User Token はブラウザ上で MusicKit JS が `music.authorize()` を通じて取得**する。OAuth のリダイレクトは発生せず、Apple の認証UIが同じページ上にオーバーレイで出る。
 
 ### 画面遷移
 
@@ -45,42 +44,40 @@ input (気分選択)
   └─ submit → loading → result
                           ├─ 「気分を変える」 → input
                           ├─ 「別の10曲にする」 → loading → result
-                          └─ 「Spotifyで聴く」
-                               ├─ ログイン済 → プレイリスト同期 → 別窓でSpotify
-                               └─ 未ログイン → モーダル3択
-                                     ├─ 1曲目だけ開く → 別窓でSpotify track URL
-                                     ├─ Spotifyでログイン → OAuthリダイレクト → /callback → プレイリスト同期 → 別窓でSpotify
-                                     └─ 閉じる
+                          └─ 「Apple Musicで聴く」
+                               ├─ サインイン済 → プレイリスト同期 → 別窓でApple Music
+                               └─ 未サインイン → モーダル2択
+                                     ├─ 1曲目だけ開く → 別窓で song URL
+                                     └─ Apple Musicでサインイン → MusicKit認証 → プレイリスト作成 → 別窓
 ```
 
 ### 共有URL復元
 
 プレイリスト生成時に `history.replaceState` で URL を `?moods=...&intensity=N&tracks=id1,...` に更新。
-ブックマーク等で再訪すると `parseShareParams` がURLから読み取り、`fetchTracks` で曲を復元して結果画面にジャンプ。
-OAuth リダイレクト中に URL のクエリが失われる問題があるため、**ログインボタン押下時に `sessionStorage` にも同じデータを退避**して、コールバック後に復元している。
+ブックマーク等で再訪すると `parseShareParams` がURLから読み取り、`fetchTracks`（`/v1/catalog/jp/songs?ids=...`）で曲を復元して結果画面にジャンプ。
 
 ### キャッシュ層
 
-1. **Vercel Function のメモリ内トークンキャッシュ** — Spotify の app token を `expires_in` まで再利用
+1. **Vercel Function の in-memory Developer Token キャッシュ** — 30日分の JWT を再利用
 2. **HTTP キャッシュヘッダ** — `public, max-age=120, s-maxage=600, stale-while-revalidate=1200`
-3. **Service Worker (Workbox)** — `/api/spotify` を StaleWhileRevalidate、30分TTL
-4. **クライアント in-memory Map** — 2分TTL、タブ内の往復削減用（`src/spotify.js`）
+3. **Service Worker (Workbox)** — `/api/apple` を StaleWhileRevalidate、30分TTL
+4. **クライアント in-memory Map** — 2分TTL（`src/apple.js`）
 
 ## ディレクトリ構成
 
 ```
 api/
-  spotify.js           Vercel Function: search/tracks/playlist 代行 + token cache
+  apple.js             Vercel Function: Developer Token発行 + search/songs/playlist 代行
 public/
   icon-512.png         PWA用マスクアイコン (512x512)
   icon-apple.png       apple-touch-icon 専用 (角丸)
 src/
   main.jsx             ReactDOM.createRoot エントリ
   Root.jsx             Appラッパー、Tweaksパネルのキーボード切替 (` キー)
-  App.jsx              全UI・状態管理・Share URL・OAuth callback処理
-  spotify.js           API client + PKCE + プレイリスト同期
+  App.jsx              全UI・状態管理・Share URL
+  apple.js             API client + MusicKit JS + プレイリスト同期
   Tweaks.jsx           開発者向けテーマ/レイアウト切替パネル
-  styles.css           全スタイル (CSS変数、`j-` prefix)
+  styles.css           全スタイル
 index.html             PWA metaタグ・favicon設定
 vite.config.js         Vite + PWA plugin設定
 vercel.json            SPAリライト (/api, /src, /@ 等を除外)
@@ -88,29 +85,25 @@ vercel.json            SPAリライト (/api, /src, /@ 等を除外)
 
 ## セットアップ
 
-### 1. Spotify Developer App の作成
+### 1. Apple Developer Program
 
-1. [https://developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) でアプリを作成
-2. **Client ID と Client Secret を控える**
-3. Redirect URIs に以下を登録：
-   - `http://127.0.0.1:5173/callback` （ローカル開発用）
-   - `https://<your-vercel-domain>/callback` （本番用）
-4. Development Mode のままなら **Users and Access** でログインを許可するユーザーを追加（最大25人）
+1. [https://developer.apple.com](https://developer.apple.com) でApple Developer Programに登録（$99/年）
+2. [Identifiers](https://developer.apple.com/account/resources/identifiers) で **MusicKit Identifier** を作成
+3. [Keys](https://developer.apple.com/account/resources/authkeys) で新しいキーを作成し、**MusicKit**を有効化
+4. `.p8` ファイルをダウンロード（1回のみ可能、保管注意）
+5. 画面から **Team ID** と **Key ID** をメモ
 
 ### 2. 環境変数
 
 `.env.example` をコピーして `.env` を作成：
 
 ```bash
-# サーバー側 (Vercel Functionでのみ使用、クライアントに露出させない)
-SPOTIFY_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-SPOTIFY_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# クライアント側 (PKCE用、Client IDは公開されても問題なし)
-VITE_SPOTIFY_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+APPLE_TEAM_ID=XXXXXXXXXX
+APPLE_KEY_ID=XXXXXXXXXX
+APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIG...\n-----END PRIVATE KEY-----"
 ```
 
-本番(Vercel)にも同じキーを Environment Variables に追加。`VITE_` prefix の有無に注意。
+`.p8` ファイルの改行を `\n` エスケープするか、複数行リテラルでそのまま貼る。本番(Vercel)にも同じ3つの環境変数を追加。
 
 ### 3. 依存関係
 
@@ -128,22 +121,22 @@ npm run dev
 npx vercel dev
 ```
 
-`npm run dev` は Vite のみ起動するため `api/spotify.js` が404になり、アプリは `pickTracks` のモック曲にフォールバックする。モック曲には `external_url` が無いので「Spotifyで聴く」ボタンはdisabledになる。
+`npm run dev` は Vite のみ起動するため `api/apple.js` が404になり、アプリは `pickTracks` のモック曲にフォールバックする。モック曲には `external_url` が無いので「Apple Musicで聴く」ボタンはdisabledになる。
 
 **実際の挙動を確認するなら `vercel dev` を使う**（初回は `vercel link` でプロジェクト紐付け）。`.env` がそのまま読まれる。
 
 ### キーボードショートカット
 
-- `` ` `` （バッククォート）— Tweaks パネル表示切替（テーマ/アクセント/レイアウト/曲数）
+- `` ` `` （バッククォート）— Tweaks パネル表示切替
 
 ## デプロイ (Vercel)
 
 1. GitHub リポジトリを Vercel に接続
-2. Environment Variables に `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `VITE_SPOTIFY_CLIENT_ID` を追加
-3. Framework Preset: Vite（自動検出されるはず）
+2. Environment Variables に `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` を追加
+3. Framework Preset: Vite（自動検出）
 4. デプロイ
 
-`vercel.json` がAPIルート保護 + SPAリライトを設定済み。追加設定は不要。
+`vercel.json` がAPIルート保護 + SPAリライトを設定済み。
 
 ## URLスキーム
 
@@ -151,61 +144,37 @@ npx vercel dev
 |---|---|
 | `/` | 入力画面 |
 | `/?moods=happy,chill&intensity=1&tracks=<id1>,<id2>,...` | 特定プレイリスト復元（ブックマーク用途） |
-| `/callback?code=...&state=...` | OAuth コールバック（即座にクリーンアップ） |
+
+Apple Music の song IDは数字列(`1234567890`)なので共有URLは Spotify 時代より短い。
 
 ## 既知の制限
 
-### Spotify Development Mode の 25人制限
+### Apple Music サブスクリプション
 
-Client Credentials (検索) は**誰でも使える**が、**OAuth ログインは Dashboard の "Users and Access" に登録された Spotify アカウント（最大25人）だけ**。解除するには **Extended Quota Mode** を申請する必要がある（数日〜数週間のレビュー、プライバシーポリシー・利用規約・デモ動画等が必要）。
+- **曲の全編再生には Apple Music 加入が必要**。未加入ユーザーは 30秒プレビューのみ聴ける（Apple Music アプリ/サイト側で制御）。
+- **ライブラリ プレイリスト作成は加入不要** と思われるが、サインインは必要。
 
-### Spotify API の制限
+### ブラウザ互換性
 
-以下は新規作成の Client ID では使えないため利用しない：
+MusicKit JS v3 は全主要ブラウザで動くが、Safariが最もスムーズ。Chrome/Firefox/Edge も基本OK。
 
-- `/v1/recommendations`（2024年11月廃止）
-- `/v1/audio-features` / `/v1/audio-analysis`（新規廃止）
-- `preview_url`（大半のトラックで `null`）
+### Developer Token の扱い
 
-気分→曲マッピングは検索クエリ `MOOD_INTENSITY_QUERIES`（`api/spotify.js`）のキーワード組み合わせで実現。audio features でのソートは不可能。
-
-### Web Playback SDK は使わない
-
-一時期実装していたが撤去済み：
-
-- Safari で DRM(FairPlay) 非対応のため動作しない
-- Spotify Premium が必要
-- SDK バンドルが重い
-
-代わりに `https://open.spotify.com/track/<id>` or `/playlist/<id>` に別窓で飛ばす方式。
-
-### プレイリストの再利用
-
-ログインユーザーの "Juke" プレイリストは `localStorage.juke.playlist.id` に ID を保存して使い回す。ユーザーが Spotify 側で削除すると ID が404になり、次回同期時に新しく作り直す。
+- `.p8` 秘密鍵は絶対に Git に commit しない・ブラウザに露出しない
+- Developer Token は最大6ヶ月有効だが、このアプリでは30日で再発行して余裕を持たせている
 
 ## トラブルシューティング
 
-### OAuth で `User not registered in the Developer Dashboard`
-→ Spotify Dashboard の Users and Access にアカウントを追加。またはExtended Quota申請。
+### `MusicKit JSの読み込みに失敗しました`
+→ ネットワーク or CSP がCDN (`js-cdn.music.apple.com`) をブロックしてる。
 
-### `Token exchange failed (400)` がたまに出る
-→ React StrictMode の useEffect 二重呼び出しで認可コードが二度交換されるのが原因。`handleCallback` は Promise memoization で対策済み。それでも出る場合は認可コードの有効期限切れ(10分)の可能性。
+### Apple の認証UIが出ない
+→ ブラウザの third-party cookie がブロックされてる場合に起きる。Safariは比較的緩い。
 
-### Spotify で「お探しの曲が見つかりませんでした」
-→ モックトラック（`npm run dev`のフォールバック）の偽IDを開いている。`vercel dev` に切り替えるか本番で確認。
-
-### `/callback` がアドレスバーに残る
-→ `cleanUrl()` で `/` に `replaceState` するが、Service Worker が旧版のまま動いていると古い挙動のまま。Hard reload で SW 更新。
-
-### プレイリストが複数作られる
-→ `spotifyFetch` が空ボディレスポンスを JSON parse に失敗して既存IDをクリアしてたバグ。修正済みだが、既存の重複は手動で Spotify から削除。
-
-### `vercel dev` で Vite 内部のimport analysisエラー
-→ `vercel.json` の SPA リライトが `/src/main.jsx` などに適用されて HTML を返してた問題。`/src/`, `/@`, `/node_modules/` などの除外済み。
+### プレイリストを再利用せず新規作成される
+→ `localStorage.juke.apple.playlist.id` がクリアされた or 既存プレイリストが削除済み。次回同期時に新規作成される（正常動作）。
 
 ## 設計で検討して見送ったこと
 
-- **Apple Music への全面乗り換え** — MusicKit JS は $99/year の Apple Developer Program 必須、Safari中心、無料プランなし → 見送り
-- **Web Playback SDK** — 上記「既知の制限」の通り撤去
-- **Vercel KV でスラッグ付き共有URL** — URL 自体に track IDs を埋めればバックエンド不要なので KV は不採用
-- **ユーザー毎に新規プレイリスト作成** — Spotify のプレイリスト一覧がゴミ溜めになるので、1ユーザー1 Juke プレイリストで使い回し
+- **完全な in-app 再生** — MusicKit JS の Player を使えば埋め込み再生可能だが、DRM や体感UXの都合で別窓遷移にしている
+- **Apple Music 以外の音楽プロバイダ** — Spotify版もあったが、Development Mode 25人制限 + Web Playback SDK の制約でApple Music に全面移行

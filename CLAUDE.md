@@ -6,47 +6,46 @@
 
 これらは**意図的に外してある**。再導入の依頼が来たら、まず下記の理由を確認すること。
 
-- **Spotify Web Playback SDK** — Safari で DRM(FairPlay) 非対応、Premium 必須、SDKが重い。代わりに `https://open.spotify.com/track/<id>` か `/playlist/<id>` に別窓で飛ばす。
-- **`/v1/recommendations`** — 2024年11月に新規アプリ向け廃止。使えない。
-- **`/v1/audio-features` / `/v1/audio-analysis`** — 同上、新規廃止。気分/強さは `MOOD_INTENSITY_QUERIES`（`api/spotify.js`）の検索クエリ文字列で実現している。
-- **Apple Music / MusicKit JS** — $99/年の Apple Developer 契約が必須、Safari中心、無料プランなし。
-- **`preview_url` を使った30秒プレビュー再生** — 新規 Client ID では大半のトラックで `null` が返るので依存できない。
+- **Spotify 連携（全撤去済）** — 以前は Spotify PKCE + Web Playback SDK + Client Credentials を使っていたが、Development Mode の 25人制限と Safari DRM 問題で Apple Music に全面移行済み。
+- **MusicKit JS の in-app Player 再生** — 実装可能だが体感UXの都合で `music.apple.com/.../song/<id>` に別窓で飛ばす方式。
+- **`preview_url` を使った30秒プレビュー** — Juke内で再生はしない方針。
 
-## Spotify API の二階建てを混同しないこと
+## Apple Music API の二階建てを混同しないこと
 
-1. **Client Credentials（アプリトークン）**
-   - Secret をサーバ(Vercel Function)でだけ使う。`api/spotify.js` が代行。
-   - 用途: `/v1/search`, `/v1/tracks`, `/v1/tracks?ids=...`
-   - クライアントが直接 Spotify を叩くのは禁止（Secret 露出するため）。
+1. **Developer Token（JWT ES256）**
+   - Apple Developer の .p8 秘密鍵でサーバ(Vercel Function)側でだけ署名する。`api/apple.js` が発行。
+   - クライアントも `GET /api/apple?action=devToken` で取得するが、MusicKit JS の初期化にしか使わない（カタログAPIはVercel Function経由）。
+   - 最長6ヶ月だが、このアプリでは30日で再発行。
 
-2. **Authorization Code + PKCE（ユーザートークン）**
-   - `src/spotify.js` でブラウザから直接。`VITE_SPOTIFY_CLIENT_ID` のみ必要（Secret 不要）。
-   - scope: `user-read-private`, `playlist-modify-private`
-   - 用途: プレイリスト作成・更新だけ。
-   - トークンは `sessionStorage`。リフレッシュトークン未対応（セッション毎再ログイン）。
+2. **Music User Token（MusicKit JS）**
+   - ブラウザ上で `music.authorize()` を呼ぶと Apple の認証UIが出てユーザートークンを取得。
+   - OAuth ではないので redirect_uri は不要。
+   - MusicKit JS が Cookie ベースでセッション管理するので、リフレッシュ処理の実装は不要。
 
-環境変数の `VITE_` prefix 有無を間違えないこと：
-- `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` — サーバ専用、ブラウザには渡らない
-- `VITE_SPOTIFY_CLIENT_ID` — ビルド時にバンドルに埋め込まれる（Client ID は公開OK）
+環境変数：
+- `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` — サーバ専用、絶対に VITE_ prefix にしない
+- クライアント側に渡す環境変数は無し（Developer Token は /api/apple 経由で取得）
 
 ## 既知の落とし穴
 
-- **React StrictMode による useEffect 二重呼び出し**で OAuth の `code` を二度交換しようとして `Token exchange failed (400)`。`handleCallback()` は module-level Promise でメモ化して対策済み。同じ問題を他の箇所に作らないこと。
+- **`APPLE_PRIVATE_KEY` の改行処理** — Vercel の環境変数は改行を `\n` リテラルで保存することがある。`api/apple.js` の getDevToken で `\\n` を実改行に置換してから `importPKCS8` に渡している。
 
-- **`cleanUrl()` は `/` に `replaceState` する**。以前は `pathname` を保持していて `/callback` が残る問題があった。戻すなら別の方法を考える。
+- **MusicKit JS の読み込みイベント** — `<script>` の `onload` ではなく `document.addEventListener('musickitloaded', ...)` を待つ必要がある。`src/apple.js` の `loadMusicKit()` でこれを処理。
 
-- **OAuth 経由でページが再読み込みされると、URL の `?moods=...&tracks=...` が消える**。ログインボタン押下時に `sessionStorage.juke.share.pending` と `juke.pending.action` の両方に状態を退避していて、コールバック後の effect が拾って復元する。どちらか片方だけ触ると復元が壊れる。
+- **Apple Music 曲ID の形式** — Spotifyと違い純粋な数字列（例: `1234567890`）。URL: `https://music.apple.com/jp/song/<id>`。
+
+- **Apple Music ライブラリ プレイリスト ID** — `p.xxxxxxxxx` 形式。URLは `https://music.apple.com/library/playlist/<id>`。catalog playlist (`pl.`) と別物。
+
+- **`localStorage.juke.apple.playlist.id` に1つだけ ID を保持**してプレイリストを使い回している。毎回作るとユーザーの Apple Music ライブラリが Juke だらけになる。
+
+- **Storefront** — Apple Music API は storefront (`jp`, `us`, 等) が必須。このアプリは `jp` 固定。他国の曲を検索したい場合はユーザーの storefront を `/v1/me/storefront` から取得して可変化する必要あり。
 
 - **`vercel.json` の SPA rewrite は `/api/`, `/src/`, `/@`, `/node_modules/`, `/assets/` を除外している**。これを単純な `/(.*)` に戻すと `vercel dev` で Vite の内部 import が HTML を受け取って死ぬ。
 
-- **`localStorage.juke.playlist.id` に1つだけ ID を保持**してプレイリストを使い回している。毎回作るとユーザーの Spotify が Juke だらけになる。`spotifyFetch` は空ボディを安全に処理する必要がある（`PUT /v1/playlists/{id}` は 200 + 空ボディを返す）。
-
-- **Spotify Developer は Development Mode 25人制限**。OAuthログイン機能は Dashboard の Users and Access に登録されたアカウントしか通らない。Extended Quota は別途申請。
-
 ## ローカル開発
 
-- `npm run dev` は Vite だけ。API が 404 になりモックトラックにフォールバック。モックには `external_url` が無いので「Spotifyで聴く」はdisabled。
-- API 込みで確認したいなら `npx vercel dev`。初回に `vercel link` が走る。
+- `npm run dev` は Vite だけ。API が 404 になりモックトラックにフォールバック。モックには `external_url` が無いので「Apple Musicで聴く」はdisabled。
+- API 込みで確認したいなら `npx vercel dev`。初回に `vercel link` が走る。`.env` がそのまま読まれる。
 
 ## ドキュメント種別
 
