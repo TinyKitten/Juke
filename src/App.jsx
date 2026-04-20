@@ -11,6 +11,7 @@ import {
 } from './spotify.js';
 
 const PENDING_SHARE_KEY = 'juke.share.pending';
+const BASE_TITLE = 'Juke — 気分で曲を見つける';
 const VALID_MOODS = new Set(['happy','sad','chill','hype','focus','nostalgic','romantic','angry','sleepy','lonely','dreamy','bittersweet']);
 
 function parseShareParams() {
@@ -1074,6 +1075,14 @@ export default function App({ tweaks }) {
       stripShareParamsFromUrl();
     }
   }, []);
+
+  useEffect(() => {
+    if (view === 'result' && selected.length) {
+      document.title = `${playlistTitle(selected)} — Juke`;
+    } else {
+      document.title = BASE_TITLE;
+    }
+  }, [view, selected]);
 
   useEffect(() => {
     if (!spotifyConfigured()) return;
