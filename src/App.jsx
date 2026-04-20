@@ -256,7 +256,8 @@ function AppleReadyModal({ url, onClose }) {
         <div className="j-eyebrow j-confirm-eyebrow">APPLE MUSIC</div>
         <h2 className="j-confirm-title">プレイリスト準備完了</h2>
         <p className="j-confirm-body">
-          Apple Musicのライブラリに追加しました。ボタンから開くとプレイリストが表示されます。
+          Apple Musicのライブラリに <strong>Juke</strong> プレイリストを追加しました。
+          Apple Musicを開いてライブラリから再生してください。
         </p>
         <div className="j-confirm-actions">
           <button className="j-btn j-btn-ghost" onClick={onClose}>閉じる</button>
@@ -268,7 +269,7 @@ function AppleReadyModal({ url, onClose }) {
             onClick={() => setTimeout(onClose, 50)}
           >
             <AppleMusicLogo size={14}/>
-            Apple Musicで開く
+            ライブラリを開く
           </a>
         </div>
       </div>

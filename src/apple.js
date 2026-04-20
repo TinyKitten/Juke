@@ -159,7 +159,7 @@ export async function syncAppleJukePlaylist({ ids, title }) {
       });
       return {
         id: existingId,
-        url: `https://music.apple.com/library/playlist/${existingId}`,
+        url: 'https://music.apple.com/library/playlists',
       };
     } catch (e) {
       localStorage.removeItem(STORE.playlistId);
@@ -178,6 +178,6 @@ export async function syncAppleJukePlaylist({ ids, title }) {
   localStorage.setItem(STORE.playlistId, playlistId);
   return {
     id: playlistId,
-    url: `https://music.apple.com/library/playlist/${playlistId}`,
+    url: 'https://music.apple.com/library/playlists',
   };
 }
