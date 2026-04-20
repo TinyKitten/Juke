@@ -234,7 +234,11 @@ function SpotifyLogo({ size = 16 }) {
 function AppleMusicLogo({ size = 16 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
-      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+      <ellipse cx="8" cy="19" rx="2.5" ry="2"/>
+      <ellipse cx="17" cy="17" rx="2.5" ry="2"/>
+      <rect x="9.5" y="7" width="1.3" height="12"/>
+      <rect x="18.5" y="5" width="1.3" height="12"/>
+      <path d="M9.5 5L19.8 3v3.5L9.5 8.5z"/>
     </svg>
   );
 }
