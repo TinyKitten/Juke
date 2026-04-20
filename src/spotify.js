@@ -14,22 +14,21 @@ const TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
 const ME_ENDPOINT = 'https://api.spotify.com/v1/me';
 const SEARCH_ENDPOINT = 'https://api.spotify.com/v1/search';
 
-const MOOD_QUERIES = {
-  happy: 'happy 楽しい',
-  sad: 'sad 悲しい',
-  chill: 'chill lofi',
-  hype: 'hype workout energetic',
-  focus: 'focus study instrumental',
-  nostalgic: 'nostalgic 懐かしい',
-  romantic: 'romantic love',
-  angry: 'angry rock',
-  sleepy: 'sleep ambient',
-  lonely: 'lonely alone',
-  dreamy: 'dreamy dreampop',
-  bittersweet: 'bittersweet',
+// [低い, ふつう, 強め] の3段階でmood別に検索クエリを出し分け
+const MOOD_INTENSITY_QUERIES = {
+  happy:       ['soft acoustic happy',     'happy 楽しい',              'euphoric uplifting dance'],
+  sad:         ['melancholic soft piano',  'sad 悲しい',                'heartbreak emotional ballad'],
+  chill:       ['ambient slow calm',       'chill lofi',               'chillhop upbeat groove'],
+  hype:        ['groovy funk upbeat',      'hype workout energetic',   'edm bass drop intense'],
+  focus:       ['ambient study minimal',   'focus study instrumental', 'electronic focus drum'],
+  nostalgic:   ['soft nostalgic acoustic', 'nostalgic 懐かしい',        '80s power ballad nostalgic'],
+  romantic:    ['soft romantic acoustic',  'romantic love',            'passionate love ballad'],
+  angry:       ['blues frustration slow',  'angry rock',               'metal hardcore rage'],
+  sleepy:      ['deep sleep ambient',      'sleep ambient',            'lullaby dream'],
+  lonely:      ['quiet solitude ambient',  'lonely alone',             'heartbreak alone ballad'],
+  dreamy:      ['ethereal ambient dream',  'dreamy dreampop',          'dream pop shoegaze lush'],
+  bittersweet: ['wistful acoustic quiet',  'bittersweet',              'bittersweet emotional ballad'],
 };
-
-const INTENSITY_MOD = ['quiet mellow', '', 'intense energetic'];
 
 const STORE = {
   verifier: 'juke.pkce.verifier',
@@ -188,12 +187,11 @@ export async function fetchPlaylistForMoods({
   if (!moods.length) return [];
   const perMood = Math.max(4, Math.ceil(count / moods.length) + 2);
   const offset = (seed * 5) % 40;
-  const modifier = INTENSITY_MOD[intensity] || '';
+  const level = Math.min(2, Math.max(0, intensity));
 
   const buckets = await Promise.all(
     moods.map((m) => {
-      const base = MOOD_QUERIES[m] || m;
-      const q = modifier ? `${base} ${modifier}` : base;
+      const q = MOOD_INTENSITY_QUERIES[m]?.[level] || m;
       return searchTracks(accessToken, market, q, perMood, offset);
     }),
   );
