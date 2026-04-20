@@ -185,6 +185,7 @@ html, body {
   border-radius: 999px;
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
 }
 .j-btn:hover { transform: translateY(-1px); }
 .j-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
@@ -415,7 +416,7 @@ html, body {
   background: var(--fg);
   border-color: var(--fg);
 }
-.j-intensity-text { font-size: 14px; }
+.j-intensity-text { font-size: 14px; white-space: nowrap; }
 
 .j-cta {
   display: flex;
@@ -1290,4 +1291,21 @@ html, body {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .j-input { padding: 48px 20px 96px; }
+  .j-intensity {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 20px 0;
+  }
+  .j-intensity-label { width: auto; }
+  .j-intensity-step { padding: 12px 10px; gap: 8px; }
+
+  .j-cta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .j-cta-hint { text-align: center; }
 }
