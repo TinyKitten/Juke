@@ -816,6 +816,14 @@ export default function App({ tweaks }) {
   }, []);
 
   useEffect(() => {
+    // Apple Music 有効なら MusicKit を先にロードしておく。
+    // user gesture と authorize() の間の await を減らすと iOS Safari で
+    // 認証UIが反応しやすくなる。
+    if (!appleAvailable) return;
+    getMusicInstance().catch((e) => console.warn('MusicKit preload failed', e));
+  }, [appleAvailable]);
+
+  useEffect(() => {
     if (!isAuthConfigured()) {
       setProcessingAuth(false);
       return;
@@ -928,10 +936,15 @@ export default function App({ tweaks }) {
   const runAppleSync = async () => {
     setSyncing(true);
     try {
-      if (!(await isAppleAuthed())) {
-        await beginAppleAuth();
+      const music = await getMusicInstance();
+      if (!music.isAuthorized) {
+        // authorize() がハングするケース(iOS cookie制限など)に備えタイムアウトで抜ける
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('authorize timeout')), 60_000),
+        );
+        await Promise.race([music.authorize(), timeout]);
       }
-      if (!(await isAppleAuthed())) {
+      if (!music.isAuthorized) {
         throw new Error('Apple Musicサインインが完了しませんでした');
       }
       const isrcs = tracks.map((t) => t.isrc).filter(Boolean);
@@ -948,6 +961,7 @@ export default function App({ tweaks }) {
       setAppleReadyUrl(result.url);
     } catch (e) {
       console.error('Apple Music playlist sync failed', e);
+      alert(`Apple Musicでの作成に失敗しました: ${e.message || e}`);
       openInSpotify(tracks[0]);
     } finally {
       setSyncing(false);
