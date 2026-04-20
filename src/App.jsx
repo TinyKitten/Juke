@@ -9,6 +9,13 @@ import {
   popPendingAction,
   syncJukePlaylist,
 } from './spotify.js';
+import {
+  fetchAppleSongsByIsrc,
+  isAppleAuthed,
+  beginAppleAuth,
+  syncAppleJukePlaylist,
+  getMusicInstance,
+} from './apple.js';
 
 // ============================================================
 // DATA
@@ -204,6 +211,7 @@ function normalizeSpotifyTrack(track, mood, index) {
     uri: track.uri,
     external_url: track.external_urls?.spotify || `https://open.spotify.com/track/${track.id}`,
     cover: images[0]?.url,
+    isrc: track.external_ids?.isrc || null,
     mood,
     reason: reasons[index % (reasons.length || 1)] || '',
   };
@@ -223,7 +231,15 @@ function SpotifyLogo({ size = 16 }) {
   );
 }
 
-function SpotifyPlayModal({ onLogin, onSingle, onClose }) {
+function AppleMusicLogo({ size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <path d="M19.5 3H4.5C3.67 3 3 3.67 3 4.5v15C3 20.33 3.67 21 4.5 21h15c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM15 15.7c0 1.27-1.03 2.3-2.3 2.3s-2.3-1.03-2.3-2.3 1.03-2.3 2.3-2.3c.29 0 .56.05.82.14V8.2l-4.85 1.04V17c0 1.27-1.03 2.3-2.3 2.3S3.77 18.27 3.77 17s1.03-2.3 2.3-2.3c.29 0 .56.05.82.14V7.3l7.92-1.66c.11-.02.19.06.19.17V15.7z"/>
+    </svg>
+  );
+}
+
+function ProviderPlayModal({ onSpotify, onApple, onSingle, onClose }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -233,24 +249,33 @@ function SpotifyPlayModal({ onLogin, onSingle, onClose }) {
   return (
     <div className="j-confirm-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div className="j-confirm j-confirm-wide" onClick={(e) => e.stopPropagation()}>
-        <div className="j-eyebrow j-confirm-eyebrow">SPOTIFY · PLAYBACK</div>
+        <div className="j-eyebrow j-confirm-eyebrow">PLAYBACK</div>
         <h2 className="j-confirm-title">どう再生しますか？</h2>
         <p className="j-confirm-body">
-          Spotifyの仕様上、1曲のリンクを開くと<strong>その後はSpotify側の自動再生</strong>に切り替わります。
-          並び順通りに聴きたい場合は、Spotifyでログインして<strong>非公開プレイリスト</strong>を自動作成できます。
+          1曲のリンクを開くだけなら<strong>その後はサービス側の自動再生</strong>になります。
+          並び順通りに聴きたい場合は、ログインして<strong>非公開プレイリスト</strong>を自動作成できます。
         </p>
         <div className="j-confirm-choices">
           <button className="j-choice" onClick={onSingle}>
             <span className="j-choice-title">1曲目だけ開く</span>
-            <span className="j-choice-sub">ログイン不要 · 続きはSpotifyの自動再生に委ねる</span>
+            <span className="j-choice-sub">ログイン不要 · Spotifyで1曲目を再生して以降は自動再生に委ねる</span>
           </button>
-          <button className="j-choice j-choice-primary" onClick={onLogin}>
+          <button className="j-choice j-choice-primary" onClick={onSpotify}>
             <span className="j-choice-title">
               <SpotifyLogo size={14}/>
               Spotifyでログインして正確に再生
             </span>
             <span className="j-choice-sub">非公開プレイリストを作って並び通り再生</span>
           </button>
+          {onApple && (
+            <button className="j-choice j-choice-apple" onClick={onApple}>
+              <span className="j-choice-title">
+                <AppleMusicLogo size={14}/>
+                Apple Musicでサインインして正確に再生
+              </span>
+              <span className="j-choice-sub">ライブラリにプレイリストを作って並び通り再生</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -560,7 +585,7 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
               disabled={!tracks[0]?.external_url || syncing}
             >
               <Icon.play/>
-              <span>{syncing ? 'Spotifyに書き込み中...' : 'Spotifyで聴く'}</span>
+              <span>{syncing ? 'プレイリストを準備中...' : 'プレイリストで聴く'}</span>
               {!syncing && <Icon.external s={12}/>}
             </button>
             <button className="j-iconbtn j-iconbtn-lg" onClick={onRegenerate} title="別の曲を">
@@ -734,6 +759,7 @@ export default function App({ tweaks }) {
   });
   const [spotifyPrompt, setSpotifyPrompt] = useState(null); // null | tracks[]
   const [syncing, setSyncing] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
 
   useEffect(() => {
     const share = parseShareParams();
@@ -741,6 +767,14 @@ export default function App({ tweaks }) {
       sessionStorage.setItem(PENDING_SHARE_KEY, JSON.stringify(share));
       stripShareParamsFromUrl();
     }
+  }, []);
+
+  useEffect(() => {
+    // Apple Music の認証情報が設定されてるかを一度だけ確認
+    fetch('/api/apple?action=status')
+      .then((r) => r.json())
+      .then((d) => setAppleAvailable(Boolean(d.available)))
+      .catch(() => setAppleAvailable(false));
   }, []);
 
   useEffect(() => {
@@ -828,34 +862,70 @@ export default function App({ tweaks }) {
 
   const playPlaylist = async () => {
     if (!tracks.length) return;
+    // Spotifyログイン済なら直接同期、それ以外は毎回モーダルで選ばせる
     if (isAuthConfigured() && isAuthed()) {
-      setSyncing(true);
-      try {
-        const uris = tracks.map((t) => t.uri || `spotify:track:${t.id}`).filter(Boolean);
-        const result = await syncJukePlaylist({
-          uris,
-          title: `${playlistTitle(selected)} — Juke`,
-        });
-        window.open(result.url, '_blank', 'noopener,noreferrer');
-      } catch (e) {
-        console.error('playlist sync failed', e);
-        openInSpotify(tracks[0]);
-      } finally {
-        setSyncing(false);
-      }
+      await runSpotifySync();
       return;
     }
-    if (isAuthConfigured()) {
-      setSpotifyPrompt(true);
-      return;
-    }
-    openInSpotify(tracks[0]);
+    setSpotifyPrompt(true);
   };
 
-  const handlePromptLogin = () => {
+  const runSpotifySync = async () => {
+    setSyncing(true);
+    try {
+      const uris = tracks.map((t) => t.uri || `spotify:track:${t.id}`).filter(Boolean);
+      const result = await syncJukePlaylist({
+        uris,
+        title: `${playlistTitle(selected)} — Juke`,
+      });
+      window.open(result.url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('Spotify playlist sync failed', e);
+      openInSpotify(tracks[0]);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const runAppleSync = async () => {
+    setSyncing(true);
+    try {
+      // Apple Music にサインインしてなければ先に認証
+      if (!(await isAppleAuthed())) {
+        await beginAppleAuth();
+      }
+      if (!(await isAppleAuthed())) {
+        throw new Error('Apple Musicサインインが完了しませんでした');
+      }
+      // Spotify トラックの ISRC → Apple Music カタログの曲ID に解決
+      const isrcs = tracks.map((t) => t.isrc).filter(Boolean);
+      if (!isrcs.length) throw new Error('ISRCが取得できませんでした');
+      const songs = await fetchAppleSongsByIsrc(isrcs);
+      const appleIds = songs.map((s) => s.id).filter(Boolean);
+      if (!appleIds.length) {
+        throw new Error('Apple Musicカタログに該当曲が見つかりませんでした');
+      }
+      const result = await syncAppleJukePlaylist({
+        ids: appleIds,
+        title: `${playlistTitle(selected)} — Juke`,
+      });
+      window.open(result.url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('Apple Music playlist sync failed', e);
+      openInSpotify(tracks[0]);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handlePromptSpotify = () => {
     setSpotifyPrompt(false);
+    if (isAuthed()) {
+      runSpotifySync();
+      return;
+    }
+    // 未ログイン: beginAuth経由 (popup)
     const uris = tracks.map((t) => t.uri || `spotify:track:${t.id}`).filter(Boolean);
-    // OAuth帰還後にJuke側の結果画面も復元できるよう、現在のプレイリスト状態を退避
     sessionStorage.setItem(
       PENDING_SHARE_KEY,
       JSON.stringify({
@@ -869,6 +939,11 @@ export default function App({ tweaks }) {
       uris,
       title: `${playlistTitle(selected)} — Juke`,
     }).catch((e) => console.error('beginAuth failed', e));
+  };
+
+  const handlePromptApple = () => {
+    setSpotifyPrompt(false);
+    runAppleSync();
   };
 
   const handlePromptSingle = () => {
@@ -956,8 +1031,9 @@ export default function App({ tweaks }) {
         )}
       </div>
       {spotifyPrompt && (
-        <SpotifyPlayModal
-          onLogin={handlePromptLogin}
+        <ProviderPlayModal
+          onSpotify={handlePromptSpotify}
+          onApple={appleAvailable ? handlePromptApple : null}
           onSingle={handlePromptSingle}
           onClose={() => setSpotifyPrompt(false)}
         />
