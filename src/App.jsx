@@ -234,8 +234,41 @@ function SpotifyLogo({ size = 16 }) {
 function AppleMusicLogo({ size = 16 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
-      <path d="M19.5 3H4.5C3.67 3 3 3.67 3 4.5v15C3 20.33 3.67 21 4.5 21h15c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM15 15.7c0 1.27-1.03 2.3-2.3 2.3s-2.3-1.03-2.3-2.3 1.03-2.3 2.3-2.3c.29 0 .56.05.82.14V8.2l-4.85 1.04V17c0 1.27-1.03 2.3-2.3 2.3S3.77 18.27 3.77 17s1.03-2.3 2.3-2.3c.29 0 .56.05.82.14V7.3l7.92-1.66c.11-.02.19.06.19.17V15.7z"/>
+      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
     </svg>
+  );
+}
+
+function AppleReadyModal({ url, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="j-confirm-backdrop" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="j-confirm" onClick={(e) => e.stopPropagation()}>
+        <div className="j-eyebrow j-confirm-eyebrow">APPLE MUSIC</div>
+        <h2 className="j-confirm-title">プレイリスト準備完了</h2>
+        <p className="j-confirm-body">
+          Apple Musicのライブラリに追加しました。ボタンから開くとプレイリストが表示されます。
+        </p>
+        <div className="j-confirm-actions">
+          <button className="j-btn j-btn-ghost" onClick={onClose}>閉じる</button>
+          <a
+            className="j-btn j-btn-primary"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setTimeout(onClose, 50)}
+          >
+            <AppleMusicLogo size={14}/>
+            Apple Musicで開く
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -760,6 +793,7 @@ export default function App({ tweaks }) {
   const [spotifyPrompt, setSpotifyPrompt] = useState(null); // null | tracks[]
   const [syncing, setSyncing] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleReadyUrl, setAppleReadyUrl] = useState(null);
 
   useEffect(() => {
     const share = parseShareParams();
@@ -890,14 +924,12 @@ export default function App({ tweaks }) {
   const runAppleSync = async () => {
     setSyncing(true);
     try {
-      // Apple Music にサインインしてなければ先に認証
       if (!(await isAppleAuthed())) {
         await beginAppleAuth();
       }
       if (!(await isAppleAuthed())) {
         throw new Error('Apple Musicサインインが完了しませんでした');
       }
-      // Spotify トラックの ISRC → Apple Music カタログの曲ID に解決
       const isrcs = tracks.map((t) => t.isrc).filter(Boolean);
       if (!isrcs.length) throw new Error('ISRCが取得できませんでした');
       const songs = await fetchAppleSongsByIsrc(isrcs);
@@ -909,7 +941,7 @@ export default function App({ tweaks }) {
         ids: appleIds,
         title: `${playlistTitle(selected)} — Juke`,
       });
-      window.open(result.url, '_blank', 'noopener,noreferrer');
+      setAppleReadyUrl(result.url);
     } catch (e) {
       console.error('Apple Music playlist sync failed', e);
       openInSpotify(tracks[0]);
@@ -952,15 +984,15 @@ export default function App({ tweaks }) {
   };
 
   // 共有URL(track IDs)からの復元
+  // StrictMode の useEffect 二重呼び出しに対しては、sessionStorage を
+  // 先に消費しておくことで2回目は早期 return になる。
   useEffect(() => {
     const raw = sessionStorage.getItem(PENDING_SHARE_KEY);
     if (!raw) return;
     sessionStorage.removeItem(PENDING_SHARE_KEY);
-    let cancelled = false;
     (async () => {
       let share;
       try { share = JSON.parse(raw); } catch { return; }
-      if (cancelled) return;
       setSelected(share.moods);
       setIntensity(share.intensity);
       setView('loading');
@@ -971,17 +1003,14 @@ export default function App({ tweaks }) {
           ? items.map((t, i) => normalizeSpotifyTrack(t, share.moods[i % share.moods.length], i))
           : pickTracks(share.moods, share.intensity + ':0', share.tracks.length);
         await minLoad;
-        if (cancelled) return;
         setTracks(list);
         setView('result');
         writeShareUrl(share.moods, share.intensity, list);
       } catch (e) {
         console.error('share restore failed', e);
-        if (cancelled) return;
         setView('input');
       }
     })();
-    return () => { cancelled = true; };
   }, []);
 
   if (processingAuth) {
@@ -1036,6 +1065,12 @@ export default function App({ tweaks }) {
           onApple={appleAvailable ? handlePromptApple : null}
           onSingle={handlePromptSingle}
           onClose={() => setSpotifyPrompt(false)}
+        />
+      )}
+      {appleReadyUrl && (
+        <AppleReadyModal
+          url={appleReadyUrl}
+          onClose={() => setAppleReadyUrl(null)}
         />
       )}
     </div>

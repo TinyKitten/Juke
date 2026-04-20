@@ -186,6 +186,7 @@ html, body {
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease;
   white-space: nowrap;
+  text-decoration: none;
 }
 .j-btn:hover { transform: translateY(-1px); }
 .j-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
