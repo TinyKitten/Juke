@@ -7,3 +7,5 @@ dev-dist
 .env.local
 .claude/
 juke/
+.vercel
+.env*.local
