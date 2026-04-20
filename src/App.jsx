@@ -1,4 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import {
+  isConfigured as spotifyConfigured,
+  beginLogin,
+  handleCallback,
+  loadToken,
+  clearToken,
+  fetchMe,
+  fetchPlaylistForMoods,
+} from './spotify.js';
+import { createPlayer, startPlayback } from './playback.js';
 
 // ============================================================
 // DATA
@@ -135,6 +145,29 @@ const REASONS = {
 // ============================================================
 // UTIL
 // ============================================================
+function normalizeSpotifyTrack(track, mood, index) {
+  const ms = track.duration_ms || 0;
+  const min = Math.floor(ms / 60000);
+  const sec = Math.floor((ms % 60000) / 1000);
+  const images = track.album?.images || [];
+  const reasons = REASONS[mood] || [];
+  return {
+    id: track.id,
+    title: track.name,
+    artist: (track.artists || []).map((a) => a.name).join(', '),
+    album: track.album?.name || '—',
+    dur: `${min}:${String(sec).padStart(2, '0')}`,
+    bpm: null,
+    preview_url: track.preview_url,
+    external_url: track.external_urls?.spotify,
+    cover: images[0]?.url,
+    duration_ms: ms,
+    uri: track.uri,
+    mood,
+    reason: reasons[index % (reasons.length || 1)] || '',
+  };
+}
+
 function pickTracks(moods, intensity, count) {
   if (moods.length === 0) return [];
   const pool = [];
@@ -172,10 +205,36 @@ function todayStr() {
   return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} (${days[d.getDay()]})`;
 }
 
+function durationMs(track) {
+  if (!track) return 0;
+  if (track.duration_ms) return track.duration_ms;
+  const [m, s] = (track.dur || '0:00').split(':').map(Number);
+  return ((m || 0) * 60 + (s || 0)) * 1000;
+}
+
+function formatMs(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 // ============================================================
 // COVER ART — generative, monochrome
 // ============================================================
-function Cover({ seed, size = 56 }) {
+function Cover({ seed, size = 56, image }) {
+  if (image) {
+    return (
+      <img
+        src={image}
+        alt=""
+        width={size}
+        height={size}
+        loading="lazy"
+        style={{ display: 'block', objectFit: 'cover', flexShrink: 0 }}
+      />
+    );
+  }
   let s = 0;
   for (let i = 0; i < seed.length; i++) s = (s * 131 + seed.charCodeAt(i)) >>> 0;
   const r = (n) => {
@@ -384,29 +443,26 @@ function Loading({ moods }) {
   );
 }
 
-function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack }) {
-  const [playingId, setPlayingId] = useState(null);
-  const [progress, setProgress] = useState(0);
+function PlaylistResult({
+  moods,
+  intensity,
+  tracks,
+  layout,
+  onRegenerate,
+  onBack,
+  playingId,
+  progress,
+  paused,
+  onTogglePlay,
+  onNext,
+  onPrev,
+}) {
   const [liked, setLiked] = useState({});
   const [savedPlaylist, setSavedPlaylist] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    if (!playingId) return;
-    const t = setInterval(() => {
-      setProgress(p => {
-        if (p >= 1) { setPlayingId(null); return 0; }
-        return p + 0.003;
-      });
-    }, 50);
-    return () => clearInterval(t);
-  }, [playingId]);
-
-  const togglePlay = (id) => {
-    if (playingId === id) { setPlayingId(null); }
-    else { setPlayingId(id); setProgress(0); }
-  };
+  const togglePlay = (id) => onTogglePlay(id);
   const toggleLike = (id) => setLiked(l => ({ ...l, [id]: !l[id] }));
 
   const title = playlistTitle(moods);
@@ -424,7 +480,7 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
         <div className="j-hero-cover">
           <div className="j-hero-cover-inner">
             {tracks.slice(0,4).map((t,i) => (
-              <Cover key={i} seed={t.id} size={120}/>
+              <Cover key={i} seed={t.id} size={120} image={t.cover}/>
             ))}
           </div>
         </div>
@@ -452,9 +508,13 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
             今日のあなたに合いそうな{tracks.length}曲。
           </p>
           <div className="j-hero-actions">
-            <button className="j-btn j-btn-primary" onClick={() => togglePlay(tracks[0].id)}>
-              {playingId ? <Icon.pause/> : <Icon.play/>}
-              <span>{playingId ? '一時停止' : '再生する'}</span>
+            <button
+              className="j-btn j-btn-primary"
+              onClick={() => togglePlay(playingId || tracks[0]?.id)}
+              disabled={!tracks.length}
+            >
+              {!paused ? <Icon.pause/> : <Icon.play/>}
+              <span>{!paused ? '一時停止' : '再生する'}</span>
             </button>
             <button className="j-iconbtn j-iconbtn-lg" onClick={onRegenerate} title="別の曲を">
               <Icon.refresh s={16}/>
@@ -496,7 +556,7 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
                 </button>
               </div>
               <div className="j-td j-td-title">
-                <Cover seed={t.id} size={40}/>
+                <Cover seed={t.id} size={40} image={t.cover}/>
                 <div className="j-track-meta">
                   <div className="j-track-title">{t.title}</div>
                   <div className="j-track-artist">{t.artist}</div>
@@ -544,7 +604,7 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
             <div className="j-share-card">
               <div className="j-share-card-covers">
                 {tracks.slice(0,4).map((t,i) => (
-                  <Cover key={i} seed={t.id} size={80}/>
+                  <Cover key={i} seed={t.id} size={80} image={t.cover}/>
                 ))}
               </div>
               <div className="j-share-card-meta">
@@ -602,7 +662,7 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
       {currentTrack && (
         <div className="j-nowplaying">
           <div className="j-np-left">
-            <Cover seed={currentTrack.id} size={44}/>
+            <Cover seed={currentTrack.id} size={44} image={currentTrack.cover}/>
             <div className="j-np-meta">
               <div className="j-np-title">{currentTrack.title}</div>
               <div className="j-np-artist">{currentTrack.artist}</div>
@@ -610,14 +670,14 @@ function PlaylistResult({ moods, intensity, tracks, layout, onRegenerate, onBack
           </div>
           <div className="j-np-center">
             <div className="j-np-controls">
-              <button className="j-iconbtn"><Icon.skipB s={14}/></button>
+              <button className="j-iconbtn" onClick={onPrev}><Icon.skipB s={14}/></button>
               <button className="j-iconbtn j-iconbtn-solid" onClick={() => togglePlay(currentTrack.id)}>
-                <Icon.pause s={14}/>
+                {paused ? <Icon.play s={14}/> : <Icon.pause s={14}/>}
               </button>
-              <button className="j-iconbtn"><Icon.skipF s={14}/></button>
+              <button className="j-iconbtn" onClick={onNext}><Icon.skipF s={14}/></button>
             </div>
             <div className="j-np-progress">
-              <span className="j-np-time">{Math.floor(progress * 30)}:{String(Math.floor((progress*30%1)*60)).padStart(2,'0')}</span>
+              <span className="j-np-time">{formatMs(progress * durationMs(currentTrack))}</span>
               <div className="j-np-bar"><div style={{width:`${progress*100}%`}}/></div>
               <span className="j-np-time j-np-time-total">{currentTrack.dur}</span>
             </div>
@@ -664,18 +724,39 @@ const MOCK_SPOTIFY_API = {
   }), 600)),
 };
 
-function SpotifyGate({ onConnect, accountPlan }) {
+function SpotifyGate({ onConnect, accountPlan, error }) {
   const [step, setStep] = useState('idle');
-  const [log, setLog] = useState([]);
+  const [log, setLog] = useState(() => error ? [{ line: `✗ ${error}`, t: Date.now() }] : []);
 
   const pushLog = (line) => setLog(l => [...l, { line, t: Date.now() }]);
+  const real = spotifyConfigured();
+  const clientIdPreview = real
+    ? (import.meta.env.VITE_SPOTIFY_CLIENT_ID || '').slice(0, 8) + '...'
+    : 'juke_xxxxxxxxxxxx';
 
   const handleConnect = async () => {
     setStep('connecting');
     setLog([]);
+    if (real) {
+      pushLog('→ GET https://accounts.spotify.com/authorize');
+      pushLog(`  client_id=${clientIdPreview}`);
+      pushLog('  scope=user-read-private user-read-email');
+      pushLog('  code_challenge_method=S256');
+      await new Promise(r => setTimeout(r, 500));
+      pushLog('← 302 Redirecting to Spotify...');
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        await beginLogin();
+      } catch (e) {
+        pushLog(`✗ ${e.message || 'auth failed'}`);
+        setStep('idle');
+      }
+      return;
+    }
     pushLog('→ GET https://accounts.spotify.com/authorize');
-    pushLog('  client_id=juke_xxxxxxxxxxxx');
+    pushLog(`  client_id=${clientIdPreview}`);
     pushLog('  scope=user-read-private user-read-email streaming');
+    pushLog('  (mock mode · set VITE_SPOTIFY_CLIENT_ID for real auth)');
     await new Promise(r => setTimeout(r, 700));
     setStep('authorizing');
     pushLog('← 302 Redirect → OAuth consent');
@@ -832,40 +913,264 @@ function PremiumWall({ user, onRetry, onBack }) {
 }
 
 export default function App({ tweaks }) {
-  const [auth, setAuth] = useState('disconnected');
+  const [auth, setAuth] = useState(() =>
+    spotifyConfigured() ? 'restoring' : 'disconnected'
+  );
   const [user, setUser] = useState(null);
+  const [authError, setAuthError] = useState(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [view, setView] = useState('input');
   const [selected, setSelected] = useState([]);
   const [intensity, setIntensity] = useState(1);
   const [seed, setSeed] = useState(0);
 
   const trackCount = tweaks.trackCount;
-  const tracks = pickTracks(selected, intensity + ':' + seed, trackCount);
+  const [tracks, setTracks] = useState([]);
 
-  const submit = () => {
+  const [sdkReady, setSdkReady] = useState(false);
+  const [deviceId, setDeviceId] = useState(null);
+  const [sdkState, setSdkState] = useState(null);
+  const playerRef = useRef(null);
+  const [fakePlayingId, setFakePlayingId] = useState(null);
+  const [fakeProgress, setFakeProgress] = useState(0);
+
+  const usingSdk = spotifyConfigured() && sdkReady && !!deviceId;
+  const sdkCurrentId = sdkState?.currentUri
+    ? tracks.find((t) => sdkState.currentUri === (t.uri || `spotify:track:${t.id}`))?.id
+    : null;
+  const playingId = usingSdk ? sdkCurrentId || null : fakePlayingId;
+  const progress = usingSdk
+    ? (sdkState?.duration ? Math.min(sdkState.position / sdkState.duration, 1) : 0)
+    : fakeProgress;
+  const paused = usingSdk ? (sdkState?.paused ?? true) : !fakePlayingId;
+
+  const loadPlaylist = async (nextSeed) => {
     setView('loading');
-    setTimeout(() => setView('result'), 2100);
+    const minLoad = new Promise((r) => setTimeout(r, 1400));
+    const token = spotifyConfigured() ? loadToken() : null;
+    try {
+      let list;
+      if (token) {
+        const entries = await fetchPlaylistForMoods({
+          accessToken: token.access_token,
+          market: user?.country || 'JP',
+          moods: selected,
+          intensity,
+          seed: nextSeed,
+          count: trackCount,
+        });
+        list = entries.length
+          ? entries.map(({ track, mood }, i) => normalizeSpotifyTrack(track, mood, i))
+          : pickTracks(selected, intensity + ':' + nextSeed, trackCount);
+      } else {
+        list = pickTracks(selected, intensity + ':' + nextSeed, trackCount);
+      }
+      await minLoad;
+      setTracks(list);
+      setView('result');
+    } catch (e) {
+      console.error('playlist fetch failed', e);
+      const fallback = pickTracks(selected, intensity + ':' + nextSeed, trackCount);
+      await minLoad;
+      setTracks(fallback);
+      setView('result');
+    }
   };
+
+  const submit = () => loadPlaylist(seed);
   const back = () => { setView('input'); };
-  const regenerate = () => { setSeed(s => s+1); };
+  const regenerate = () => {
+    const next = seed + 1;
+    setSeed(next);
+    loadPlaylist(next);
+  };
 
   const handleConnect = (userData) => {
     setUser(userData);
     setAuth('connected');
   };
   const handleDisconnect = () => {
+    if (playerRef.current) {
+      playerRef.current.pause().catch(() => {});
+      playerRef.current.disconnect();
+      playerRef.current = null;
+    }
+    setSdkReady(false);
+    setDeviceId(null);
+    setSdkState(null);
+    clearToken();
     setAuth('disconnected');
     setUser(null);
+    setAuthError(null);
     setView('input');
     setSelected([]);
   };
+
+  const requestDisconnect = () => setConfirmDisconnect(true);
+  const cancelDisconnect = () => setConfirmDisconnect(false);
+  const confirmDisconnectNow = () => {
+    setConfirmDisconnect(false);
+    handleDisconnect();
+  };
+
+  useEffect(() => {
+    if (!spotifyConfigured()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const newToken = await handleCallback();
+        const token = newToken || loadToken();
+        if (!token) {
+          if (!cancelled) setAuth('disconnected');
+          return;
+        }
+        const me = await fetchMe(token.access_token);
+        if (cancelled) return;
+        setUser(me);
+        setAuth('connected');
+      } catch (e) {
+        if (cancelled) return;
+        clearToken();
+        setAuthError(e.message || 'Auth failed');
+        setAuth('disconnected');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (auth !== 'connected' || !spotifyConfigured()) return;
+    let active = true;
+    let player;
+    (async () => {
+      try {
+        player = await createPlayer('Juke', () => loadToken()?.access_token || '');
+        player.addListener('ready', ({ device_id }) => {
+          if (!active) return;
+          setDeviceId(device_id);
+          setSdkReady(true);
+        });
+        player.addListener('not_ready', () => { if (active) setSdkReady(false); });
+        player.addListener('player_state_changed', (state) => {
+          if (!active) return;
+          if (!state) { setSdkState(null); return; }
+          setSdkState({
+            currentUri: state.track_window?.current_track?.uri || null,
+            paused: state.paused,
+            position: state.position,
+            duration: state.duration,
+          });
+        });
+        ['initialization_error', 'authentication_error', 'account_error', 'playback_error'].forEach((ev) => {
+          player.addListener(ev, ({ message }) => console.warn(`sdk ${ev}:`, message));
+        });
+        await player.connect();
+        if (active) playerRef.current = player;
+        else player.disconnect();
+      } catch (e) {
+        console.error('sdk setup failed', e);
+      }
+    })();
+    return () => {
+      active = false;
+      if (player) player.disconnect();
+      playerRef.current = null;
+      setDeviceId(null);
+      setSdkReady(false);
+      setSdkState(null);
+    };
+  }, [auth]);
+
+  useEffect(() => {
+    if (!usingSdk || !sdkState || sdkState.paused || !sdkState.duration) return;
+    const iv = setInterval(() => {
+      setSdkState((s) =>
+        s ? { ...s, position: Math.min(s.position + 250, s.duration) } : s
+      );
+    }, 250);
+    return () => clearInterval(iv);
+  }, [usingSdk, sdkState?.paused, sdkState?.duration, sdkState?.currentUri]);
+
+  useEffect(() => {
+    if (usingSdk || !fakePlayingId) return;
+    const iv = setInterval(() => {
+      setFakeProgress((p) => {
+        if (p >= 1) { setFakePlayingId(null); return 0; }
+        return p + 0.003;
+      });
+    }, 50);
+    return () => clearInterval(iv);
+  }, [usingSdk, fakePlayingId]);
+
+  const togglePlay = async (trackId) => {
+    if (!trackId) return;
+    if (usingSdk) {
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const targetUri = track.uri || `spotify:track:${trackId}`;
+      const player = playerRef.current;
+      if (!player) return;
+      if (sdkState?.currentUri === targetUri) {
+        if (sdkState.paused) await player.resume().catch((e) => console.warn(e));
+        else await player.pause().catch((e) => console.warn(e));
+        return;
+      }
+      const token = loadToken();
+      if (!token) return;
+      const uris = tracks.map((t) => t.uri || `spotify:track:${t.id}`);
+      const idx = tracks.findIndex((t) => t.id === trackId);
+      try {
+        await startPlayback({
+          accessToken: token.access_token,
+          deviceId,
+          uris,
+          offset: Math.max(0, idx),
+        });
+      } catch (e) {
+        console.error('start playback', e);
+      }
+    } else {
+      if (fakePlayingId === trackId) setFakePlayingId(null);
+      else { setFakePlayingId(trackId); setFakeProgress(0); }
+    }
+  };
+
+  const nextTrack = async () => {
+    if (usingSdk) await playerRef.current?.nextTrack().catch(() => {});
+  };
+  const prevTrack = async () => {
+    if (usingSdk) await playerRef.current?.previousTrack().catch(() => {});
+  };
+
+  if (auth === 'restoring') {
+    return (
+      <div className={`j-app j-theme-${tweaks.theme} j-accent-${tweaks.accent}`}>
+        <AppHeader view="input" onBack={() => {}}/>
+        <div className="j-stage">
+          <div className="j-loading">
+            <div className="j-loading-mark">
+              <div className="j-pulse"/>
+              <div className="j-pulse j-pulse-2"/>
+            </div>
+            <div className="j-loading-step">
+              Spotifyと接続中<span className="j-loading-ellipsis">...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (auth === 'disconnected') {
     return (
       <div className={`j-app j-theme-${tweaks.theme} j-accent-${tweaks.accent}`}>
         <AppHeader view="input" onBack={() => {}}/>
         <div className="j-stage">
-          <SpotifyGate onConnect={handleConnect} accountPlan={tweaks.accountPlan}/>
+          <SpotifyGate
+            onConnect={handleConnect}
+            accountPlan={tweaks.accountPlan}
+            error={authError}
+          />
         </div>
       </div>
     );
@@ -884,7 +1189,7 @@ export default function App({ tweaks }) {
 
   return (
     <div className={`j-app j-theme-${tweaks.theme} j-accent-${tweaks.accent}`}>
-      <AppHeader view={view} onBack={back} user={user} onDisconnect={handleDisconnect}/>
+      <AppHeader view={view} onBack={back} user={user} onDisconnect={requestDisconnect}/>
       <div className="j-stage">
         {view === 'input' && (
           <MoodInput
@@ -904,8 +1209,51 @@ export default function App({ tweaks }) {
             layout={tweaks.layout}
             onRegenerate={regenerate}
             onBack={back}
+            playingId={playingId}
+            progress={progress}
+            paused={paused}
+            onTogglePlay={togglePlay}
+            onNext={nextTrack}
+            onPrev={prevTrack}
           />
         )}
+      </div>
+      {confirmDisconnect && (
+        <ConfirmDialog
+          eyebrow="DISCONNECT · SPOTIFY"
+          title="Spotifyとの接続を解除しますか？"
+          body="再生中の曲は停止し、再び使うにはSpotifyでログインし直す必要があります。"
+          confirmLabel="切断する"
+          cancelLabel="キャンセル"
+          onCancel={cancelDisconnect}
+          onConfirm={confirmDisconnectNow}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmDialog({ eyebrow, title, body, confirmLabel, cancelLabel, onCancel, onConfirm }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="j-confirm-backdrop" onClick={onCancel} role="dialog" aria-modal="true">
+      <div className="j-confirm" onClick={(e) => e.stopPropagation()}>
+        {eyebrow && <div className="j-eyebrow j-confirm-eyebrow">{eyebrow}</div>}
+        <h2 className="j-confirm-title">{title}</h2>
+        {body && <p className="j-confirm-body">{body}</p>}
+        <div className="j-confirm-actions">
+          <button className="j-btn j-btn-outline" onClick={onCancel} autoFocus>
+            {cancelLabel}
+          </button>
+          <button className="j-btn j-btn-primary" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

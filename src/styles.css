@@ -892,6 +892,50 @@ html, body {
   letter-spacing: 0.05em;
 }
 
+/* ==================== CONFIRM DIALOG ==================== */
+.j-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 120;
+  animation: j-fade 0.18s ease-out;
+  padding: 20px;
+}
+.j-confirm {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  padding: 24px;
+  animation: j-rise 0.22s ease-out;
+}
+.j-confirm-eyebrow {
+  margin-bottom: 12px;
+}
+.j-confirm-title {
+  font-family: var(--sans);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+}
+.j-confirm-body {
+  font-size: 13px;
+  color: var(--fg-dim);
+  line-height: 1.65;
+  margin: 0 0 20px;
+}
+.j-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 /* ==================== SPOTIFY GATE ==================== */
 .j-gate {
   max-width: 640px;
