@@ -8,7 +8,7 @@ export default function TweaksPanel({ value, onChange }) {
       <div className="j-tweaks-group">
         <div className="j-tweaks-label">THEME</div>
         <div className="j-tweaks-seg">
-          {['light','dark'].map(t => (
+          {['auto','light','dark'].map(t => (
             <button key={t} className={value.theme === t ? 'active' : ''}
               onClick={() => update('theme', t)}>{t}</button>
           ))}

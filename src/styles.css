@@ -33,6 +33,28 @@
   --line-soft: #1f1d1a;
 }
 
+/* autoモード: OS設定に追従 */
+.j-theme-auto {
+  --bg: #f4f2ee;
+  --bg-elev: #ffffff;
+  --fg: #1a1917;
+  --fg-dim: #6b6760;
+  --fg-faint: #a8a49c;
+  --line: #e2ddd4;
+  --line-soft: #ebe7de;
+}
+@media (prefers-color-scheme: dark) {
+  .j-theme-auto {
+    --bg: #131210;
+    --bg-elev: #1c1b18;
+    --fg: #f2efe8;
+    --fg-dim: #8b8880;
+    --fg-faint: #504d47;
+    --line: #2a2824;
+    --line-soft: #1f1d1a;
+  }
+}
+
 .j-accent-mono { --accent: var(--fg); --accent-on: var(--bg); }
 .j-accent-lime { --accent: #c7d63a; --accent-on: #141410; }
 .j-accent-coral { --accent: #e8674a; --accent-on: #fff; }
@@ -1156,6 +1178,7 @@ html, body {
 }
 .j-header-user-name {
   font-weight: 500;
+  white-space: nowrap;
 }
 .j-header-user-plan {
   font-family: var(--mono);
@@ -1164,7 +1187,9 @@ html, body {
   color: var(--fg-dim);
   padding-left: 6px;
   border-left: 1px solid var(--line);
+  white-space: nowrap;
 }
+.j-date { white-space: nowrap; }
 .j-header-user-x {
   background: transparent;
   border: none;
@@ -1251,4 +1276,18 @@ html, body {
   }
   .j-td-album, .j-td-reason { display: none; }
   .j-td-dur > span:last-child { display: inline; }
+}
+
+@media (max-width: 640px) {
+  .j-header { padding: 14px 16px; gap: 12px; }
+  .j-header-left { gap: 10px; }
+  .j-header-right { gap: 8px; }
+  .j-date { display: none; }
+  .j-avatar { display: none; }
+  .j-header-user-plan { display: none; }
+  .j-header-user-name {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }

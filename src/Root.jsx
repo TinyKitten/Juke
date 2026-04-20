@@ -3,7 +3,7 @@ import App from './App.jsx';
 import TweaksPanel from './Tweaks.jsx';
 
 const TWEAK_DEFAULTS = {
-  theme: 'dark',
+  theme: 'auto',
   accent: 'mono',
   layout: 'default',
   trackCount: 10,
