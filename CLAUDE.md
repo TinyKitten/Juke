@@ -9,7 +9,7 @@
 - **Spotify Web Playback SDK** — Safari で DRM(FairPlay) 非対応、Premium 必須、SDKが重い。代わりに `https://open.spotify.com/track/<id>` か `/playlist/<id>` に別窓で飛ばす。
 - **`/v1/recommendations`** — 2024年11月に新規アプリ向け廃止。使えない。
 - **`/v1/audio-features` / `/v1/audio-analysis`** — 同上、新規廃止。気分/強さは `MOOD_INTENSITY_QUERIES`（`api/spotify.js`）の検索クエリ文字列で実現している。
-- ~~**Apple Music / MusicKit JS**~~ — 2択→3択モーダルとして復活済。検索は Spotify、Apple Music は ISRC経由でライブラリプレイリスト作成の追加オプション。`src/apple.js`, `api/apple.js` 参照。
+- **Apple Music 全面移行** — 一度実装したが撤回、現在はハイブリッド構成。検索は Spotify、Apple Music は ISRC経由のプレイリスト作成オプションとして併設。`src/apple.js`, `api/apple.js` 参照。再度「Apple Music だけに寄せる」要望が来たら、Spotify を切るとSpotifyユーザーが使えなくなる点を確認すること。
 - **`preview_url` を使った30秒プレビュー再生** — 新規 Client ID では大半のトラックで `null` が返るので依存できない。
 
 ## Spotify API の二階建てを混同しないこと
@@ -28,6 +28,7 @@
 環境変数の `VITE_` prefix 有無を間違えないこと：
 - `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` — サーバ専用、ブラウザには渡らない
 - `VITE_SPOTIFY_CLIENT_ID` — ビルド時にバンドルに埋め込まれる（Client ID は公開OK）
+- `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` — サーバ専用、`.p8` 秘密鍵はクライアントに絶対露出させない
 
 ## 既知の落とし穴
 
@@ -49,7 +50,7 @@
 
 ## ローカル開発
 
-- `npm run dev` は Vite だけ。API が 404 になりモックトラックにフォールバック。モックには `external_url` が無いので「Spotifyで聴く」はdisabled。
+- `npm run dev` は Vite だけ。API が 404 になりモックトラックにフォールバック。モックには `external_url` が無いので「プレイリストで聴く」はdisabled。
 - API 込みで確認したいなら `npx vercel dev`。初回に `vercel link` が走る。
 
 ## ドキュメント種別
