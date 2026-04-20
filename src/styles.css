@@ -1307,5 +1307,6 @@ html, body {
     align-items: stretch;
     gap: 14px;
   }
+  .j-cta .j-btn-primary { justify-content: center; }
   .j-cta-hint { text-align: center; }
 }
