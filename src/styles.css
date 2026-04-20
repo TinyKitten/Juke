@@ -186,6 +186,7 @@ html, body {
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease;
   white-space: nowrap;
+  text-decoration: none;
 }
 .j-btn:hover { transform: translateY(-1px); }
 .j-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
@@ -1014,6 +1015,18 @@ html, body {
 }
 .j-choice-primary .j-choice-sub {
   color: rgba(255,255,255,0.75);
+}
+.j-choice-apple {
+  background: #fa2d48;
+  border-color: #fa2d48;
+  color: #fff;
+}
+.j-choice-apple:hover {
+  background: #ff4561;
+  border-color: #ff4561;
+}
+.j-choice-apple .j-choice-sub {
+  color: rgba(255,255,255,0.8);
 }
 
 /* ==================== SPOTIFY GATE ==================== */
