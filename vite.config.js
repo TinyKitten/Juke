@@ -43,6 +43,15 @@ export default defineConfig({
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
             },
           },
+          {
+            urlPattern: ({ url }) => url.pathname === '/api/spotify',
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'juke-spotify-api',
+              expiration: { maxEntries: 80, maxAgeSeconds: 60 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
         ],
       },
     }),
