@@ -1,43 +1,75 @@
-const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
-const REDIRECT_URI =
-  import.meta.env.VITE_SPOTIFY_REDIRECT_URI ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/callback` : '');
-const SCOPES = [
-  'user-read-private',
-  'user-read-email',
-  'streaming',
-  'user-modify-playback-state',
-  'user-read-playback-state',
-];
-const AUTH_ENDPOINT = 'https://accounts.spotify.com/authorize';
-const TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
-const ME_ENDPOINT = 'https://api.spotify.com/v1/me';
-const SEARCH_ENDPOINT = 'https://api.spotify.com/v1/search';
+// Spotifyカタログ検索・曲取得はVercel関数経由(Client Credentials)
+// プレイリスト作成のみユーザー認証(PKCE)を使用
 
-// [低い, ふつう, 強め] の3段階でmood別に検索クエリを出し分け
-const MOOD_INTENSITY_QUERIES = {
-  happy:       ['soft acoustic happy',     'happy 楽しい',              'euphoric uplifting dance'],
-  sad:         ['melancholic soft piano',  'sad 悲しい',                'heartbreak emotional ballad'],
-  chill:       ['ambient slow calm',       'chill lofi',               'chillhop upbeat groove'],
-  hype:        ['groovy funk upbeat',      'hype workout energetic',   'edm bass drop intense'],
-  focus:       ['ambient study minimal',   'focus study instrumental', 'electronic focus drum'],
-  nostalgic:   ['soft nostalgic acoustic', 'nostalgic 懐かしい',        '80s power ballad nostalgic'],
-  romantic:    ['soft romantic acoustic',  'romantic love',            'passionate love ballad'],
-  angry:       ['blues frustration slow',  'angry rock',               'metal hardcore rage'],
-  sleepy:      ['deep sleep ambient',      'sleep ambient',            'lullaby dream'],
-  lonely:      ['quiet solitude ambient',  'lonely alone',             'heartbreak alone ballad'],
-  dreamy:      ['ethereal ambient dream',  'dreamy dreampop',          'dream pop shoegaze lush'],
-  bittersweet: ['wistful acoustic quiet',  'bittersweet',              'bittersweet emotional ballad'],
-};
+// ============================================================
+// Catalog (authenticated via backend proxy + in-memory cache)
+// ============================================================
+
+const apiCache = new Map();
+const API_CACHE_TTL = 120_000; // 2min
+
+async function cachedGet(url) {
+  const now = Date.now();
+  const hit = apiCache.get(url);
+  if (hit && now - hit.at < API_CACHE_TTL) return hit.data;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} failed (${res.status})`);
+  const data = await res.json();
+  apiCache.set(url, { data, at: now });
+  return data;
+}
+
+export async function fetchTracks(ids, market = 'JP') {
+  const cleaned = (ids || []).filter(Boolean).slice(0, 50);
+  if (!cleaned.length) return [];
+  const params = new URLSearchParams({
+    action: 'tracks',
+    ids: cleaned.join(','),
+    market,
+  });
+  const data = await cachedGet(`/api/spotify?${params.toString()}`);
+  return (data.tracks || []).filter(Boolean);
+}
+
+export async function fetchPlaylistForMoods({
+  market = 'JP',
+  moods,
+  intensity = 1,
+  seed = 0,
+  count = 10,
+}) {
+  if (!moods.length) return [];
+  const params = new URLSearchParams({
+    action: 'playlist',
+    moods: moods.join(','),
+    intensity: String(intensity),
+    seed: String(seed),
+    count: String(count),
+    market,
+  });
+  const data = await cachedGet(`/api/spotify?${params.toString()}`);
+  return data.entries || [];
+}
+
+// ============================================================
+// User Auth (PKCE) — only for playlist creation
+// ============================================================
+
+const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
+const REDIRECT_URI = typeof window !== 'undefined'
+  ? `${window.location.origin}/callback`
+  : '';
+const AUTH_SCOPES = ['user-read-private', 'playlist-modify-private'];
 
 const STORE = {
+  token: 'juke.user.token',
   verifier: 'juke.pkce.verifier',
   state: 'juke.pkce.state',
-  token: 'juke.spotify.token',
+  pending: 'juke.pending.action',
+  playlistId: 'juke.playlist.id',
 };
 
-export const isConfigured = () => Boolean(CLIENT_ID);
-export const redirectUri = () => REDIRECT_URI;
+export const isAuthConfigured = () => Boolean(CLIENT_ID);
 
 function base64url(bytes) {
   let str = '';
@@ -57,8 +89,11 @@ async function deriveChallenge(verifier) {
   return base64url(new Uint8Array(hash));
 }
 
-export async function beginLogin() {
+export async function beginAuth(pendingAction) {
   if (!CLIENT_ID) throw new Error('VITE_SPOTIFY_CLIENT_ID is not set');
+  if (pendingAction) {
+    sessionStorage.setItem(STORE.pending, JSON.stringify(pendingAction));
+  }
   const verifier = randomString(64);
   const state = randomString(16);
   sessionStorage.setItem(STORE.verifier, verifier);
@@ -68,22 +103,23 @@ export async function beginLogin() {
     client_id: CLIENT_ID,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
-    scope: SCOPES.join(' '),
+    scope: AUTH_SCOPES.join(' '),
     code_challenge_method: 'S256',
     code_challenge: await deriveChallenge(verifier),
     state,
   });
-  window.location.assign(`${AUTH_ENDPOINT}?${params.toString()}`);
+  window.location.assign(`https://accounts.spotify.com/authorize?${params.toString()}`);
 }
 
 let callbackPromise = null;
 
-export function handleCallback() {
-  if (!callbackPromise) callbackPromise = doHandleCallback();
+export function handleAuthCallback() {
+  if (!callbackPromise) callbackPromise = doHandleAuthCallback();
   return callbackPromise;
 }
 
-async function doHandleCallback() {
+async function doHandleAuthCallback() {
+  if (typeof window === 'undefined') return null;
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
@@ -100,7 +136,6 @@ async function doHandleCallback() {
     cleanUrl();
     throw new Error('PKCE state mismatch');
   }
-
   sessionStorage.removeItem(STORE.verifier);
   sessionStorage.removeItem(STORE.state);
   cleanUrl();
@@ -112,14 +147,12 @@ async function doHandleCallback() {
     client_id: CLIENT_ID,
     code_verifier: verifier,
   });
-  const res = await fetch(TOKEN_ENDPOINT, {
+  const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
   });
-  if (!res.ok) {
-    throw new Error(`Token exchange failed (${res.status})`);
-  }
+  if (!res.ok) throw new Error(`Token exchange failed (${res.status})`);
   const token = await res.json();
   token.acquired_at = Date.now();
   sessionStorage.setItem(STORE.token, JSON.stringify(token));
@@ -131,7 +164,7 @@ function cleanUrl() {
   window.history.replaceState({}, document.title, `${window.location.origin}/`);
 }
 
-export function loadToken() {
+export function loadUserToken() {
   const raw = sessionStorage.getItem(STORE.token);
   if (!raw) return null;
   try {
@@ -148,86 +181,90 @@ export function loadToken() {
   }
 }
 
-export function clearToken() {
+export const isAuthed = () => Boolean(loadUserToken());
+
+export function clearUserAuth() {
   sessionStorage.removeItem(STORE.token);
+  localStorage.removeItem(STORE.playlistId);
 }
 
-export async function fetchMe(accessToken) {
-  const res = await fetch(ME_ENDPOINT, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error(`/v1/me failed (${res.status})`);
-  return res.json();
+export function popPendingAction() {
+  const raw = sessionStorage.getItem(STORE.pending);
+  if (!raw) return null;
+  sessionStorage.removeItem(STORE.pending);
+  try { return JSON.parse(raw); } catch { return null; }
 }
 
-export async function fetchTracks(accessToken, market, ids) {
-  const cleaned = (ids || []).filter(Boolean).slice(0, 50);
-  if (!cleaned.length) return [];
-  const params = new URLSearchParams({
-    ids: cleaned.join(','),
-    market: market || 'JP',
+// ============================================================
+// Playlist sync (reuses one Juke playlist per user)
+// ============================================================
+
+async function spotifyFetch(accessToken, path, init = {}) {
+  const res = await fetch(`https://api.spotify.com${path}`, {
+    ...init,
+    headers: {
+      ...(init.headers || {}),
+      Authorization: `Bearer ${accessToken}`,
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+    },
   });
-  const res = await fetch(`https://api.spotify.com/v1/tracks?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error(`/v1/tracks failed (${res.status})`);
-  const data = await res.json();
-  return (data.tracks || []).filter(Boolean);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Spotify ${path} ${res.status} ${text}`);
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }
 
-async function searchTracks(accessToken, market, query, limit, offset) {
-  const params = new URLSearchParams({
-    q: query,
-    type: 'track',
-    limit: String(limit),
-    offset: String(offset),
-    market: market || 'JP',
-  });
-  const res = await fetch(`${SEARCH_ENDPOINT}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error(`Search failed (${res.status})`);
-  const data = await res.json();
-  return data.tracks?.items || [];
-}
+export async function syncJukePlaylist({ uris, title }) {
+  const token = loadUserToken();
+  if (!token) throw new Error('not authed');
+  const cleanedUris = (uris || []).filter(Boolean).slice(0, 100);
+  if (!cleanedUris.length) throw new Error('no tracks');
 
-export async function fetchPlaylistForMoods({
-  accessToken,
-  market = 'JP',
-  moods,
-  intensity = 1,
-  seed = 0,
-  count = 10,
-}) {
-  if (!moods.length) return [];
-  const perMood = Math.max(4, Math.ceil(count / moods.length) + 2);
-  const offset = (seed * 5) % 40;
-  const level = Math.min(2, Math.max(0, intensity));
-
-  const buckets = await Promise.all(
-    moods.map((m) => {
-      const q = MOOD_INTENSITY_QUERIES[m]?.[level] || m;
-      return searchTracks(accessToken, market, q, perMood, offset);
-    }),
-  );
-
-  const interleaved = [];
-  const maxLen = Math.max(...buckets.map((b) => b.length));
-  for (let i = 0; i < maxLen; i++) {
-    for (let j = 0; j < buckets.length; j++) {
-      if (buckets[j][i]) {
-        interleaved.push({ track: buckets[j][i], mood: moods[j] });
-      }
+  const existingId = localStorage.getItem(STORE.playlistId);
+  if (existingId) {
+    try {
+      await spotifyFetch(token.access_token, `/v1/playlists/${existingId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: title, description: 'Curated by Juke' }),
+      });
+      await spotifyFetch(token.access_token, `/v1/playlists/${existingId}/tracks`, {
+        method: 'PUT',
+        body: JSON.stringify({ uris: cleanedUris }),
+      });
+      return {
+        id: existingId,
+        url: `https://open.spotify.com/playlist/${existingId}`,
+      };
+    } catch (e) {
+      localStorage.removeItem(STORE.playlistId);
     }
   }
 
-  const seen = new Set();
-  const out = [];
-  for (const entry of interleaved) {
-    if (seen.has(entry.track.id)) continue;
-    seen.add(entry.track.id);
-    out.push(entry);
-    if (out.length >= count) break;
-  }
-  return out;
+  const me = await spotifyFetch(token.access_token, '/v1/me');
+  const playlist = await spotifyFetch(
+    token.access_token,
+    `/v1/users/${encodeURIComponent(me.id)}/playlists`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name: title,
+        description: 'Curated by Juke',
+        public: false,
+      }),
+    },
+  );
+  await spotifyFetch(
+    token.access_token,
+    `/v1/playlists/${playlist.id}/tracks`,
+    { method: 'PUT', body: JSON.stringify({ uris: cleanedUris }) },
+  );
+  localStorage.setItem(STORE.playlistId, playlist.id);
+  return {
+    id: playlist.id,
+    url: playlist.external_urls?.spotify || `https://open.spotify.com/playlist/${playlist.id}`,
+  };
 }

@@ -968,6 +968,53 @@ html, body {
   gap: 8px;
   justify-content: flex-end;
 }
+.j-confirm-wide { max-width: 460px; }
+.j-confirm-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+.j-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: var(--sans);
+  color: var(--fg);
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.j-choice:hover { border-color: var(--fg); }
+.j-choice-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.j-choice-sub {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+.j-choice-primary {
+  background: #1DB954;
+  border-color: #1DB954;
+  color: #fff;
+}
+.j-choice-primary:hover {
+  background: #1ed760;
+  border-color: #1ed760;
+}
+.j-choice-primary .j-choice-sub {
+  color: rgba(255,255,255,0.75);
+}
 
 /* ==================== SPOTIFY GATE ==================== */
 .j-gate {

@@ -36,16 +36,6 @@ export default function TweaksPanel({ value, onChange }) {
       </div>
 
       <div className="j-tweaks-group">
-        <div className="j-tweaks-label">SPOTIFY ACCOUNT</div>
-        <div className="j-tweaks-seg">
-          {['premium','free'].map(p => (
-            <button key={p} className={value.accountPlan === p ? 'active' : ''}
-              onClick={() => update('accountPlan', p)}>{p}</button>
-          ))}
-        </div>
-      </div>
-
-      <div className="j-tweaks-group">
         <div className="j-tweaks-label">TRACKS: <span className="j-tweaks-value">{value.trackCount}</span></div>
         <input
           type="range"

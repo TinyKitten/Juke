@@ -7,7 +7,6 @@ const TWEAK_DEFAULTS = {
   accent: 'mono',
   layout: 'default',
   trackCount: 10,
-  accountPlan: 'premium',
 };
 
 export default function Root() {
