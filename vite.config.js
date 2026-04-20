@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['icon-512.png', 'icon-apple.png'],
       manifest: {
         name: 'Juke — 気分で曲を見つける',

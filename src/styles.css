@@ -1272,6 +1272,52 @@ html, body {
 }
 .j-header-user-x:hover { color: var(--fg); }
 
+/* ==================== UPDATE PROMPT ==================== */
+.j-update-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 999px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  z-index: 200;
+  max-width: calc(100vw - 32px);
+  animation: j-rise 0.22s ease-out;
+}
+.j-update-prompt-text {
+  font-family: var(--sans);
+  white-space: nowrap;
+  padding-right: 4px;
+}
+.j-update-prompt-btn {
+  background: transparent;
+  border: 1px solid var(--bg);
+  color: var(--bg);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--sans);
+  white-space: nowrap;
+}
+.j-update-prompt-btn:hover { opacity: 0.85; }
+.j-update-prompt-primary {
+  background: var(--bg);
+  color: var(--fg);
+}
+@media (max-width: 480px) {
+  .j-update-prompt-text { font-size: 12px; }
+  .j-update-prompt { padding: 8px 10px; gap: 6px; }
+}
+
 /* ==================== TWEAKS ==================== */
 .j-tweaks {
   position: fixed;
