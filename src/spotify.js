@@ -129,8 +129,7 @@ async function doHandleCallback() {
 
 function cleanUrl() {
   if (typeof window === 'undefined') return;
-  const clean = window.location.origin + window.location.pathname;
-  window.history.replaceState({}, document.title, clean);
+  window.history.replaceState({}, document.title, `${window.location.origin}/`);
 }
 
 export function loadToken() {
