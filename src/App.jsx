@@ -37,6 +37,18 @@ function stripShareParamsFromUrl() {
   const newUrl = window.location.origin + window.location.pathname + (q ? `?${q}` : '');
   window.history.replaceState({}, document.title, newUrl);
 }
+
+function writeShareUrl(moods, intensity, tracks) {
+  if (typeof window === 'undefined') return;
+  if (!moods?.length || !tracks?.length) return;
+  const params = new URLSearchParams({
+    moods: moods.join(','),
+    intensity: String(intensity),
+    tracks: tracks.map((t) => t.id).join(','),
+  });
+  const newUrl = `${window.location.origin}/?${params.toString()}`;
+  window.history.replaceState({}, document.title, newUrl);
+}
 import { createPlayer, startPlayback } from './playback.js';
 
 // ============================================================
@@ -1004,17 +1016,22 @@ export default function App({ tweaks }) {
       await minLoad;
       setTracks(list);
       setView('result');
+      writeShareUrl(selected, intensity, list);
     } catch (e) {
       console.error('playlist fetch failed', e);
       const fallback = pickTracks(selected, intensity + ':' + nextSeed, trackCount);
       await minLoad;
       setTracks(fallback);
       setView('result');
+      writeShareUrl(selected, intensity, fallback);
     }
   };
 
   const submit = () => loadPlaylist(seed);
-  const back = () => { setView('input'); };
+  const back = () => {
+    setView('input');
+    stripShareParamsFromUrl();
+  };
   const regenerate = () => {
     const next = seed + 1;
     setSeed(next);
@@ -1040,6 +1057,7 @@ export default function App({ tweaks }) {
     setAuthError(null);
     setView('input');
     setSelected([]);
+    stripShareParamsFromUrl();
   };
 
   const requestDisconnect = () => setConfirmDisconnect(true);
@@ -1115,6 +1133,7 @@ export default function App({ tweaks }) {
         if (cancelled) return;
         setTracks(list);
         setView('result');
+        writeShareUrl(share.moods, share.intensity, list);
       } catch (e) {
         console.error('share restore failed', e);
         if (cancelled) return;
