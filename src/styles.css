@@ -508,7 +508,12 @@ html, body {
   width: 100%;
   height: 100%;
 }
-.j-hero-cover-inner > svg { width: 100%; height: 100%; }
+.j-hero-cover-inner > svg,
+.j-hero-cover-inner > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .j-hero-meta { display: flex; flex-direction: column; justify-content: flex-end; }
 .j-hero-title {
   font-family: var(--sans);
@@ -853,7 +858,12 @@ html, body {
   flex-shrink: 0;
   overflow: hidden;
 }
-.j-share-card-covers > svg { width: 100%; height: 100%; }
+.j-share-card-covers > svg,
+.j-share-card-covers > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .j-share-card-meta { flex: 1; min-width: 0; }
 .j-share-card-brand {
   font-family: var(--mono);
