@@ -7,7 +7,36 @@ import {
   clearToken,
   fetchMe,
   fetchPlaylistForMoods,
+  fetchTracks,
 } from './spotify.js';
+
+const PENDING_SHARE_KEY = 'juke.share.pending';
+const VALID_MOODS = new Set(['happy','sad','chill','hype','focus','nostalgic','romantic','angry','sleepy','lonely','dreamy','bittersweet']);
+
+function parseShareParams() {
+  if (typeof window === 'undefined') return null;
+  const p = new URLSearchParams(window.location.search);
+  const rawMoods = (p.get('moods') || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const moods = rawMoods.filter((m) => VALID_MOODS.has(m)).slice(0, 3);
+  const intensityRaw = parseInt(p.get('intensity') || '1', 10);
+  const intensity = [0,1,2].includes(intensityRaw) ? intensityRaw : 1;
+  const tracks = (p.get('tracks') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  if (!moods.length || !tracks.length) return null;
+  return { moods, intensity, tracks };
+}
+
+function stripShareParamsFromUrl() {
+  if (typeof window === 'undefined') return;
+  const p = new URLSearchParams(window.location.search);
+  let changed = false;
+  ['moods', 'intensity', 'tracks'].forEach((k) => {
+    if (p.has(k)) { p.delete(k); changed = true; }
+  });
+  if (!changed) return;
+  const q = p.toString();
+  const newUrl = window.location.origin + window.location.pathname + (q ? `?${q}` : '');
+  window.history.replaceState({}, document.title, newUrl);
+}
 import { createPlayer, startPlayback } from './playback.js';
 
 // ============================================================
@@ -619,8 +648,13 @@ function PlaylistResult({
               <button
                 className="j-share-opt"
                 onClick={() => {
-                  const url = `juke.app/p/${Math.random().toString(36).slice(2,9)}`;
-                  navigator.clipboard?.writeText(url).catch(()=>{});
+                  const params = new URLSearchParams({
+                    moods: moods.join(','),
+                    intensity: String(intensity),
+                    tracks: tracks.map((t) => t.id).join(','),
+                  });
+                  const url = `${window.location.origin}/?${params.toString()}`;
+                  navigator.clipboard?.writeText(url).catch(() => {});
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1800);
                 }}
@@ -631,7 +665,9 @@ function PlaylistResult({
                 <span className="j-share-opt-label">
                   {copied ? 'コピーしました' : 'リンクをコピー'}
                 </span>
-                <span className="j-share-opt-sub">juke.app/p/xxxxxx</span>
+                <span className="j-share-opt-sub">
+                  {typeof window !== 'undefined' ? new URL(window.location.origin).host : ''}
+                </span>
               </button>
               <button className="j-share-opt" onClick={() => setShareOpen(false)}>
                 <span className="j-share-opt-icon">
@@ -1014,6 +1050,14 @@ export default function App({ tweaks }) {
   };
 
   useEffect(() => {
+    const share = parseShareParams();
+    if (share) {
+      sessionStorage.setItem(PENDING_SHARE_KEY, JSON.stringify(share));
+      stripShareParamsFromUrl();
+    }
+  }, []);
+
+  useEffect(() => {
     if (!spotifyConfigured()) return;
     let cancelled = false;
     (async () => {
@@ -1037,6 +1081,48 @@ export default function App({ tweaks }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (auth !== 'connected') return;
+    const raw = sessionStorage.getItem(PENDING_SHARE_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(PENDING_SHARE_KEY);
+    let cancelled = false;
+    (async () => {
+      let share;
+      try { share = JSON.parse(raw); } catch { return; }
+      if (cancelled) return;
+      setSelected(share.moods);
+      setIntensity(share.intensity);
+      setView('loading');
+      const minLoad = new Promise((r) => setTimeout(r, 700));
+      try {
+        const token = spotifyConfigured() ? loadToken() : null;
+        let list;
+        if (token) {
+          const items = await fetchTracks(token.access_token, user?.country || 'JP', share.tracks);
+          if (items.length) {
+            list = items.map((t, i) =>
+              normalizeSpotifyTrack(t, share.moods[i % share.moods.length], i)
+            );
+          } else {
+            list = pickTracks(share.moods, share.intensity + ':0', share.tracks.length);
+          }
+        } else {
+          list = pickTracks(share.moods, share.intensity + ':0', share.tracks.length);
+        }
+        await minLoad;
+        if (cancelled) return;
+        setTracks(list);
+        setView('result');
+      } catch (e) {
+        console.error('share restore failed', e);
+        if (cancelled) return;
+        setView('input');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [auth, user]);
 
   useEffect(() => {
     if (auth !== 'connected' || !spotifyConfigured()) return;

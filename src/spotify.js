@@ -160,6 +160,21 @@ export async function fetchMe(accessToken) {
   return res.json();
 }
 
+export async function fetchTracks(accessToken, market, ids) {
+  const cleaned = (ids || []).filter(Boolean).slice(0, 50);
+  if (!cleaned.length) return [];
+  const params = new URLSearchParams({
+    ids: cleaned.join(','),
+    market: market || 'JP',
+  });
+  const res = await fetch(`https://api.spotify.com/v1/tracks?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`/v1/tracks failed (${res.status})`);
+  const data = await res.json();
+  return (data.tracks || []).filter(Boolean);
+}
+
 async function searchTracks(accessToken, market, query, limit, offset) {
   const params = new URLSearchParams({
     q: query,
