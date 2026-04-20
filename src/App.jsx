@@ -825,13 +825,6 @@ function SpotifyGate({ onConnect, accountPlan, error }) {
   return (
     <div className="j-gate">
       <div className="j-gate-inner">
-        <div className="j-gate-brand">
-          <div className="j-logo-mark">
-            <span className="j-logo-dot"/>
-            <span className="j-logo-line"/>
-          </div>
-          <div className="j-logo-text">JUKE</div>
-        </div>
         <div className="j-eyebrow">STEP 1 / 2 · CONNECT</div>
         <h1 className="j-h1">
           Spotifyと<br/>
