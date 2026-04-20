@@ -2,7 +2,7 @@
 
 > 気分を選ぶと、今日あなたに合いそうな10曲を並べるWebアプリ。
 
-[https://juke-beryl.vercel.app](https://juke-beryl.vercel.app)
+[https://juke.tinykitten.dev](https://juke.tinykitten.dev)
 
 気分タグを最大3つ選ぶと Spotify から曲をキュレートし、**Spotify または Apple Music** で聴ける。非公開プレイリストを自動作成する機能もあり（要ログイン）。
 
