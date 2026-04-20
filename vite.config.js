@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-512.png'],
+      includeAssets: ['icon-512.png', 'icon-apple.png'],
       manifest: {
         name: 'Juke — 気分で曲を見つける',
         short_name: 'Juke',
